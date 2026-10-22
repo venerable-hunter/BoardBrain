@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -13,11 +13,89 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { logout, getUserId } from "@/lib/auth";
+import { getBoards, createBoard, updateBoard, type Board } from "@/lib/api";
 
 export const KanbanBoard = () => {
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [backendBoardId, setBackendBoardId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const userId = getUserId();
+
+  // Load board from backend on mount
+  useEffect(() => {
+    const loadBoard = async () => {
+      if (!userId) return;
+
+      try {
+        const boards = await getBoards(userId);
+
+        if (boards.length > 0) {
+          // Load existing board
+          const backendBoard = boards[0];
+          setBackendBoardId(backendBoard.id);
+          setBoard({
+            columns: backendBoard.columns_data,
+            cards: backendBoard.cards_data,
+          });
+        } else {
+          // Create new board
+          const newBoard = await createBoard(userId, "My Kanban Board");
+          setBackendBoardId(newBoard.id);
+          setBoard({
+            columns: newBoard.columns_data,
+            cards: newBoard.cards_data,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to load board:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadBoard();
+  }, [userId]);
+
+  // Save board to backend
+  const saveBoard = async () => {
+    if (!backendBoardId || !userId) return;
+
+    try {
+      await updateBoard(backendBoardId, userId, {
+        columns_data: board.columns,
+        cards_data: board.cards,
+      });
+    } catch (error) {
+      console.error("Failed to save board:", error);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    window.location.reload();
+  };
+
+  const handleBoardUpdate = (update: any) => {
+    if (update.columns) {
+      setBoard((prev) => ({
+        ...prev,
+        columns: update.columns,
+      }));
+    }
+    if (update.cards) {
+      setBoard((prev) => ({
+        ...prev,
+        cards: update.cards,
+      }));
+    }
+    // Save to backend after update
+    setTimeout(() => saveBoard(), 0);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -39,40 +117,55 @@ export const KanbanBoard = () => {
       return;
     }
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
+    setBoard((prev) => {
+      const newBoard = {
+        ...prev,
+        columns: moveCard(prev.columns, active.id as string, over.id as string),
+      };
+      // Save to backend after state update
+      setTimeout(() => saveBoard(), 0);
+      return newBoard;
+    });
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
+    setBoard((prev) => {
+      const newBoard = {
+        ...prev,
+        columns: prev.columns.map((column) =>
+          column.id === columnId ? { ...column, title } : column
+        ),
+      };
+      // Save to backend after state update
+      setTimeout(() => saveBoard(), 0);
+      return newBoard;
+    });
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
-    }));
+    setBoard((prev) => {
+      const newBoard = {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [id]: { id, title, details: details || "No details yet." },
+        },
+        columns: prev.columns.map((column) =>
+          column.id === columnId
+            ? { ...column, cardIds: [...column.cardIds, id] }
+            : column
+        ),
+      };
+      // Save to backend after state update
+      setTimeout(() => saveBoard(), 0);
+      return newBoard;
+    });
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
     setBoard((prev) => {
-      return {
+      const newBoard = {
         ...prev,
         cards: Object.fromEntries(
           Object.entries(prev.cards).filter(([id]) => id !== cardId)
@@ -86,10 +179,23 @@ export const KanbanBoard = () => {
             : column
         ),
       };
+      // Save to backend after state update
+      setTimeout(() => saveBoard(), 0);
+      return newBoard;
     });
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[var(--navy-dark)]">Loading your board...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative overflow-hidden">
@@ -111,13 +217,21 @@ export const KanbanBoard = () => {
                 and capture quick notes without getting buried in settings.
               </p>
             </div>
-            <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                Focus
-              </p>
-              <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                One board. Five columns. Zero clutter.
-              </p>
+            <div className="flex items-center gap-4">
+              <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
+                  Focus
+                </p>
+                <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
+                  One board. Five columns. Zero clutter.
+                </p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 rounded-xl border border-[var(--stroke)] bg-[var(--surface)] text-sm font-semibold text-[var(--navy-dark)] hover:bg-[var(--stroke)] transition-all"
+              >
+                Logout
+              </button>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
@@ -160,6 +274,12 @@ export const KanbanBoard = () => {
           </DragOverlay>
         </DndContext>
       </main>
+
+      <AIChatSidebar
+        boardId={backendBoardId}
+        userId={userId}
+        onBoardUpdate={handleBoardUpdate}
+      />
     </div>
   );
 };

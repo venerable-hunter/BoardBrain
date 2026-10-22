@@ -28,6 +28,29 @@ For the MVP, this will run locally (in a docker container)
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
 
+## Docker Setup
+
+The project uses Docker to containerize the backend application. The Dockerfile is in the project root.
+
+### Dockerfile
+- Uses Python 3.12-slim base image
+- Installs uv package manager
+- Copies backend/ directory
+- Installs dependencies from backend/requirements.txt
+- Exposes port 8000
+- Runs uvicorn to serve the FastAPI app
+
+### Building and Running
+Use the scripts in scripts/ directory:
+- Mac/Linux: ./scripts/start.sh and ./scripts/stop.sh
+- Windows: scripts\start.bat and scripts\stop.bat
+
+Or manually:
+```bash
+docker build -t pm-mvp .
+docker run -p 8000:8000 --name pm-mvp-container pm-mvp
+```
+
 ## Starting Point
 
 A working MVP of the frontend has been built and is already in frontend. This is not yet designed for the Docker setup. It's a pure frontend-only demo.
